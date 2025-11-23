@@ -499,31 +499,12 @@ Payload: {
 
 Contributions are welcome! Here's how you can help:
 
-### Reporting Bugs
-1. Check if bug already exists in [Issues](https://github.com/yourusername/aetherhome/issues)
-2. Create new issue with:
-   - Clear title
-   - Detailed description
-   - Steps to reproduce
-   - Expected vs actual behavior
-   - Screenshots/logs if applicable
 
 ### Suggesting Features
 - Open an issue with `[Feature Request]` tag
 - Describe the feature and use case
 - Explain why it would be useful
 
-### Pull Requests
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit changes (`git commit -m 'Add AmazingFeature'`)
-4. Push to branch (`git push origin feature/AmazingFeature`)
-5. Open Pull Request
-
-### Code Style
-- Follow existing code style
-- Add comments for complex logic
-- Update README if adding features
 
 ## 📄 License
 
@@ -575,27 +556,7 @@ SOFTWARE.
 
 Need help? Here are your options:
 
-- 📧 Email: support@aetherhome.example.com
-- 💬 [GitHub Discussions](https://github.com/yourusername/aetherhome/discussions)
-- 🐛 [Issue Tracker](https://github.com/yourusername/aetherhome/issues)
-- 📖 [Wiki](https://github.com/yourusername/aetherhome/wiki)
-
-## 🗺️ Roadmap
-
-### Version 2.0 (Planned)
-- [ ] Add temperature/humidity sensor
-- [ ] Implement voice control (Alexa/Google Home)
-- [ ] Mobile app (Android/iOS)
-- [ ] Historical data logging
-- [ ] Automation rules engine
-- [ ] Multi-room support
-- [ ] Energy monitoring
-
-### Version 3.0 (Future)
-- [ ] Machine learning for usage patterns
-- [ ] Security camera integration
-- [ ] Guest access control
-- [ ] Cloud sync and backup
+- 📧 Email: rohandindokar25@gmail.com
 
 ## 📊 Project Status
 
@@ -617,7 +578,7 @@ Need help? Here are your options:
 
 ---
 
-**Made with ❤️ by the AetherHome Team**
+**Made with ❤️ by the Rohan& Team**
 
 ⭐ Star this repo if you find it helpful!
 
