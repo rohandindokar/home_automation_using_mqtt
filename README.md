@@ -21,7 +21,6 @@ A modern, web-based IoT smart home control system built with ESP8266 and MQTT pr
 - [Usage](#-usage)
 - [MQTT Topics](#-mqtt-topics)
 - [Troubleshooting](#-troubleshooting)
-- [Contributing](#-contributing)
 - [License](#-license)
 - [Acknowledgments](#-acknowledgments)
 
@@ -51,7 +50,7 @@ A modern, web-based IoT smart home control system built with ESP8266 and MQTT pr
 
 ## 🎬 Demo
 
-![Dashboard Preview](https://via.placeholder.com/800x400?text=Dashboard+Preview)
+![Dashboard Preview](https://github.com/rohandindokar/home_automation_using_mqtt/blob/main/Screenshot%202025-11-23%20144427.png)
 
 ### Dashboard Controls
 - **Door**: Open/Close buttons with visual feedback
