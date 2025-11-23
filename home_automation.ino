@@ -37,15 +37,15 @@
 // ============== CONFIGURATION ==============
 
 // WiFi Credentials
-const char* WIFI_SSID = "IQOO Neo 10R";
-const char* WIFI_PASS = "Ron@1234";
+const char* WIFI_SSID = "Your Wifi name";
+const char* WIFI_PASS = "your password";
 
 // HiveMQ Cloud Credentials
-const char* MQTT_HOST = "af3ea6f8e14447d8a93bae9f7b761b26.s1.eu.hivemq.cloud";
+const char* MQTT_HOST = "your_host_name";
 const int   MQTT_PORT = 8883;
-const char* MQTT_USER = "ronik25";
-const char* MQTT_PASS = "#Ronik25hive";
-const char* CLIENT_ID = "aether_esp8266";
+const char* MQTT_USER = "your_mqtt_username";
+const char* MQTT_PASS = "your_password";
+const char* CLIENT_ID = "yourclientid";
 
 // MQTT Topics
 const char* TOPIC_DOOR      = "home/livingroom/door/set";
