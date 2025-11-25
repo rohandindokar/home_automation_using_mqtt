@@ -38,15 +38,15 @@ A modern, web-based IoT smart home control system built with ESP8266 and MQTT pr
 ### Device Control
 - **🚪 Door Control** - Servo motor with open/close functionality
 - **💡 Light Control** - LED with simple ON/OFF toggle
-- **🌀 Fan Control** - DC motor with PWM speed control (0-100%)
+- **🌀 Fan Control** - DC motor with ON/OFF control via L293D motor driver
 
 ### Technical Features
 - 🔐 TLS/SSL encrypted communication
 - 🔄 Auto-reconnect on connection loss
 - 📡 MQTT protocol for reliable messaging
 - ⚡ Low latency control (<100ms)
-- 🛡️ Protected motor circuit with flyback diode
-- 📈 PWM-based speed control for smooth operation
+- 🛡️ L293D motor driver with built-in protection
+- 🎛️ Simple ON/OFF motor control
 
 ## 🎬 Demo
 
@@ -55,7 +55,7 @@ A modern, web-based IoT smart home control system built with ESP8266 and MQTT pr
 ### Dashboard Controls
 - **Door**: Open/Close buttons with visual feedback
 - **Light**: Toggle switch with glowing effect when ON
-- **Fan**: Toggle with speed slider (PWM control)
+- **Fan**: Toggle switch for ON/OFF control
 
 ## 🏗️ System Architecture
 
@@ -73,6 +73,7 @@ A modern, web-based IoT smart home control system built with ESP8266 and MQTT pr
                                     │ Motor  │    │        │    │ Motor  │
                                     └────────┘    └────────┘    └────────┘
                                       Door          Light         Fan
+                                                               (via L293D)
 ```
 
 ### Communication Flow
@@ -88,22 +89,20 @@ A modern, web-based IoT smart home control system built with ESP8266 and MQTT pr
 | Component | Specification | Quantity | Purpose |
 |-----------|--------------|----------|---------|
 | ESP8266 NodeMCU | ESP-12E | 1 | Main controller |
-| SG90 Servo Motor | 0-90° rotation | 1 | Door simulation |
+| SG90 Servo Motor | 0-180° rotation | 1 | Door simulation |
 | LED (5mm) | Any color | 1 | Light simulation |
-| DC Motor | 3-6V, <100mA | 1 | Fan simulation |
-| BC547 Transistor | NPN, TO-92 | 1 | Motor driver |
-| 1N4007 Diode | 1A, 1000V | 1 | Flyback protection |
+| DC Motor | 3-6V, <600mA | 1 | Fan simulation |
+| L293D Motor Driver | Module/IC | 1 | Motor control |
 | 220Ω Resistor | 1/4W | 1 | LED current limiting |
-| 1kΩ Resistor | 1/4W | 1 | Transistor base |
 
 ### Additional Items
 - Breadboard (830 points)
-- Jumper wires (M-M, ~15 pieces)
+- Jumper wires (M-M, ~12 pieces)
 - 5V External Power Supply (for servo and motor)
 - USB cable (Micro USB for programming)
 
 ### Total Estimated Cost
-- **~$15-20 USD** for all components
+- **~$12-15 USD** for all components
 
 ## 💻 Software Requirements
 
@@ -137,13 +136,14 @@ Install via Arduino Library Manager:
 | | Brown (GND) | GND | Common ground |
 | **LED** | Anode (+) | D6 (GPIO12) | Via ESP8266 |
 | | Cathode (-) | GND | Via 220Ω resistor |
-| **BC547** | Base (B) | D7 (GPIO13) | Via 1kΩ resistor |
-| | Collector (C) | Motor (-) | Motor control |
-| | Emitter (E) | GND | Common ground |
-| **DC Motor** | Positive (+) | External 5V | Power supply |
-| | Negative (-) | BC547 Collector | Via transistor |
-| **1N4007** | Cathode | External 5V | Silver band to +5V |
-| | Anode | BC547 Collector | Flyback protection |
+| **L293D** | ENS (Enable) | D7 (GPIO13) | Motor enable |
+| | MC5 (IN1) | D5 (GPIO14) | Direction control 1 |
+| | MC6 (IN2) | D8 (GPIO15) | Direction control 2 |
+| | Motor1 | Motor Wire A | Motor terminal |
+| | Motor2 | Motor Wire B | Motor terminal |
+| | Motor Power | External 5V | Motor supply |
+| | Logic Power | NodeMCU 5V | Logic supply |
+| | GND | Common GND | Ground |
 
 ### Circuit Schematic
 
@@ -152,50 +152,51 @@ Install via Arduino Library Manager:
                          │
         ┌────────────────┼────────────────┐
         │                │                │
-        │           1N4007 Cathode        │
-        │           (Silver Band)         │
-   Servo Red            │            Motor (+)
-        │           ┌────┴────┐          │
-        │           │  ━━│►━━ │          │
-        │           └────┬────┘          │
-        │           1N4007 Anode         │
+   Servo Red        L293D Motor Power     │
         │                │                │
-   Servo Orange    Motor (-)──────────┬──┘
-        │                              │
-       D4                         BC547 (C)
-        │                         ┌────┴────┐
-        │                         │  BC547  │
-   Servo Brown                    │   NPN   │
-        │                         └─┬───┬───┘
-       GND                          E   B
-        │                           │   │
-        │                          GND  │
-   LED Cathode                          │
-        │                              1kΩ
-      220Ω                               │
-        │                               D7
-   LED Anode
+   Servo Orange    ┌─────┴─────┐          │
+        │          │   L293D   │          │
+       D4          │   MOTOR   │     DC Motor
+        │          │  DRIVER   │          │
+        │          │           │     ┌────┴────┐
+   Servo Brown     │ Motor1────┼─────┤ Wire A  │
+        │          │ Motor2────┼─────┤ Wire B  │
+       GND         │           │     └─────────┘
+        │          │  ENS ─────┤──── D7 (GPIO13)
+        │          │  MC5 ─────┤──── D5 (GPIO14)
+   LED Anode       │  MC6 ─────┤──── D8 (GPIO15)
+        │          │           │
+       D6          │  GND ─────┤──── GND (Common)
+        │          │           │
+   LED Cathode     │ Logic Power──── NodeMCU 5V
+        │          └───────────┘
+      220Ω
         │
-       D6
+       GND ────────────┴──────────────────────────┘
 ```
 
-### BC547 Pinout (Important!)
+### L293D Module Pinout
 ```
-    Flat side facing you:
-    ┌─────────┐
-    │  BC547  │
-    │  ─────  │
-    └┬───┬───┬┘
-     E   B   C
+L293D Pin Layout:
+─────────────────
+ENS   → D7 (Enable/Speed)
+MC5   → D5 (Direction bit 1)
+MC6   → D8 (Direction bit 2)
+Motor1 → DC Motor Terminal 1
+Motor2 → DC Motor Terminal 2
+Vin   → 5V External
+GND   → Common Ground
 ```
 
 ### Pin Summary
 ```
 ESP8266 Pin | GPIO  | Device
-------------|-------|--------
+------------|-------|------------------------
 D4          | GPIO2 | Servo Motor (Door)
+D5          | GPIO14| L293D MC5 (Motor Control)
 D6          | GPIO12| LED (Light)
-D7          | GPIO13| DC Motor via BC547 (Fan)
+D7          | GPIO13| L293D ENS (Motor Enable)
+D8          | GPIO15| L293D MC6 (Motor Control)
 GND         | -     | Common Ground
 ```
 
@@ -216,18 +217,20 @@ GND         | -     | Common Ground
    Cathode (-) → 220Ω → GND
    ```
 
-3. **Connect DC Motor Circuit**
+3. **Connect L293D Motor Driver**
    ```
-   ESP8266 D7 → 1kΩ → BC547 Base (B)
-   BC547 Emitter (E) → GND
-   BC547 Collector (C) → Motor (-)
-   Motor (+) → 5V external
-   1N4007 Cathode (silver band) → 5V
-   1N4007 Anode → BC547 Collector
+   D7 (GPIO13) → L293D ENS
+   D5 (GPIO14) → L293D MC5
+   D8 (GPIO15) → L293D MC6
+   Motor Wire A → L293D Motor1
+   Motor Wire B → L293D Motor2
+   5V External → L293D Motor Power
+   NodeMCU 5V → L293D Logic Power
+   GND → Common Ground (all connected together)
    ```
 
 4. **Power Connections**
-   - Connect all GND points together
+   - Connect all GND points together (CRITICAL!)
    - Power ESP8266 via USB
    - Power servo and motor from external 5V supply
 
@@ -265,9 +268,9 @@ GND         | -     | Common Ground
 
 #### C. Upload ESP8266 Code
 
-1. Open `aetherhome_esp8266.ino` in Arduino IDE
+1. Open `home_automation.ino` in Arduino IDE
 
-2. Update credentials (lines 31-45):
+2. Update credentials in the code:
    ```cpp
    const char* WIFI_SSID = "YOUR_WIFI_SSID";
    const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
@@ -290,21 +293,17 @@ GND         | -     | Common Ground
 
 #### D. Setup Dashboard
 
-1. Open `dashboard.html` in a text editor
+1. Open `index.html` in your web browser
 
-2. The HiveMQ credentials are entered via the web interface (no code changes needed)
+2. Click the ⚙️ settings icon
 
-3. Open `dashboard.html` in your web browser
-
-4. Click the ⚙️ settings icon
-
-5. Enter your HiveMQ credentials:
+3. Enter your HiveMQ credentials:
    - Broker Host: `your-cluster.s1.eu.hivemq.cloud`
    - Port: `8884`
    - Username: `your_username`
    - Password: `your_password`
 
-6. Click **Connect**
+4. Click **Connect**
 
 ## ⚙️ Configuration
 
@@ -327,15 +326,17 @@ const char* MQTT_PASS = "your_password";
 ### Device Pin Configuration
 To change pins, edit in ESP8266 code:
 ```cpp
-#define SERVO_PIN  D4   // Change to desired pin
-#define LIGHT_PIN  D6   // Change to desired pin
-#define FAN_PIN    D7   // Change to desired pin
+#define SERVO_PIN   D4   // Servo motor
+#define LIGHT_PIN   D6   // LED
+#define MOTOR_ENS   D7   // L293D Enable
+#define MOTOR_IN1   D5   // L293D IN1
+#define MOTOR_IN2   D8   // L293D IN2
 ```
 
 ### Servo Position Calibration
 Adjust door positions:
 ```cpp
-#define DOOR_OPEN    90   // Angle when door is open
+#define DOOR_OPEN    180  // Angle when door is open
 #define DOOR_CLOSED  0    // Angle when door is closed
 ```
 
@@ -349,7 +350,7 @@ Adjust door positions:
    - Check Serial Monitor for connection status
 
 2. **Open Dashboard**
-   - Open `dashboard.html` in browser
+   - Open `index.html` in browser
    - Click settings icon (⚙️)
    - Enter HiveMQ credentials
    - Click **Connect**
@@ -358,7 +359,7 @@ Adjust door positions:
 ### Controlling Devices
 
 #### Door Control
-- Click **Open** button to open door (servo rotates to 90°)
+- Click **Open** button to open door (servo rotates to 180°)
 - Click **Close** button to close door (servo rotates to 0°)
 - Status text updates in real-time
 
@@ -368,11 +369,9 @@ Adjust door positions:
 - Label shows current state
 
 #### Fan Control
-1. Turn ON fan with toggle switch
-2. Adjust speed slider (0-100%)
-3. Fan icon spins at corresponding speed
-4. Motor speed changes in real-time
-5. Setting speed to 0 turns fan OFF automatically
+- Toggle switch to turn motor ON/OFF
+- Motor runs at full speed when ON
+- Motor stops completely when OFF
 
 ### Monitoring
 
@@ -387,8 +386,7 @@ Adjust door positions:
 | `home/livingroom/door/set` | Dashboard → ESP8266 | `OPEN` or `CLOSE` | Door control |
 | `home/livingroom/light/set` | Dashboard → ESP8266 | `ON` or `OFF` | Light control |
 | `home/livingroom/fan/set` | Dashboard → ESP8266 | `ON` or `OFF` | Fan power |
-| `home/livingroom/fan/speed/set` | Dashboard → ESP8266 | `0-255` | Fan speed (PWM) |
-| `home/livingroom/status` | ESP8266 → Dashboard | JSON | Device status |
+| `home/livingroom/status` | ESP8266 → Dashboard | Status string | Device status |
 
 ### Example MQTT Messages
 
@@ -404,21 +402,10 @@ Topic: home/livingroom/light/set
 Payload: ON
 ```
 
-**Set Fan Speed to 75%:**
+**Turn On Fan:**
 ```
-Topic: home/livingroom/fan/speed/set
-Payload: 191
-```
-
-**Status Update:**
-```json
-Topic: home/livingroom/status
-Payload: {
-  "light": true,
-  "fan": true,
-  "fanSpeed": 191,
-  "fanSpeedPercent": 75
-}
+Topic: home/livingroom/fan/set
+Payload: ON
 ```
 
 ## 🔍 Troubleshooting
@@ -436,12 +423,6 @@ Payload: {
 - ✅ Check cluster URL is correct
 - ✅ Ensure port is `8883` (not 8884)
 - ✅ Check if firewall is blocking connection
-
-**Error Codes:**
-- `-4`: Connection timeout (check internet)
-- `-2`: Connection failed (check credentials)
-- `4`: Bad credentials (wrong username/password)
-- `5`: Unauthorized (check HiveMQ access management)
 
 #### Device Not Responding
 - ✅ Check wiring connections
@@ -465,12 +446,16 @@ Payload: {
 
 ### Hardware Issues
 
-#### Motor Not Spinning
-- ✅ Check BC547 is inserted correctly (E-B-C from left)
-- ✅ Verify 1kΩ resistor is in base circuit
+#### Motor Not Running
+- ✅ Check all L293D connections (ENS, MC5, MC6)
+- ✅ Verify common ground connection
 - ✅ Check external 5V power supply
-- ✅ Try different motor (current motor may be >100mA)
-- ✅ Consider upgrading to TIP120 transistor
+- ✅ Try swapping Motor1 and Motor2 if runs backward
+- ✅ Ensure motor current is <600mA
+
+#### Motor Runs Backward
+- **Solution**: Physically swap Motor1 and Motor2 wires
+- No code changes needed
 
 #### Servo Jittering
 - ✅ Add 100µF capacitor across servo power pins
@@ -487,23 +472,16 @@ Payload: {
 - ✅ Add 100µF capacitor across ESP8266 power pins
 - ✅ Ensure external 5V supply doesn't backfeed into ESP8266
 
-### Flyback Diode Issues
+### L293D Motor Driver Issues
 
-#### Motor Runs But Transistor Gets Hot
-- ✅ Check 1N4007 diode orientation (silver band to +5V)
-- ✅ Verify diode is 1N4007 (not lower rating)
-- ✅ Motor may be drawing too much current
+#### Motor Doesn't Turn Off
+- ✅ Check ENS is connected to D7
+- ✅ Verify MC5 and MC6 connections
+- ✅ Check common ground connection
 
-## 🤝 Contributing
-
-Contributions are welcome! Here's how you can help:
-
-
-### Suggesting Features
-- Open an issue with `[Feature Request]` tag
-- Describe the feature and use case
-- Explain why it would be useful
-
+#### Motor Runs Continuously
+- ✅ Ensure MC5 and MC6 are NOT tied to power/ground
+- ✅ They must be controlled by ESP8266 pins D5 and D8
 
 ## 📄 License
 
@@ -512,7 +490,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ```
 MIT License
 
-Copyright (c) 2024 AetherHome
+Copyright (c) 2025 Ronik
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -553,15 +531,16 @@ SOFTWARE.
 
 ## 📞 Support
 
-Need help? Here are your options:
+Need help? Contact:
 
 - 📧 Email: rohandindokar25@gmail.com
+- 💬 GitHub Issues: [Create an issue](https://github.com/rohandindokar/home_automation_using_mqtt/issues)
 
 ## 📊 Project Status
 
 - ✅ Core functionality complete
 - ✅ Documentation complete
-- ✅ Tested on multiple devices
+- ✅ Tested with L293D motor driver
 - 🔄 Active maintenance
 - 🎯 Production ready
 
@@ -570,14 +549,14 @@ Need help? Here are your options:
 ### v1.0.0 (Current)
 - Initial release
 - Door, Light, and Fan control
-- PWM speed control for fan
+- Simple ON/OFF motor control via L293D
 - Web-based dashboard
 - MQTT over TLS/SSL
 - Comprehensive documentation
 
 ---
 
-**Made with ❤️ by the Rohan& Team**
+**Made with ❤️ by Rohan & Team**
 
 ⭐ Star this repo if you find it helpful!
 
