@@ -1,331 +1,260 @@
-/*
- * AetherHome ESP8266 MQTT Controller
- * ===================================
- * PROTOTYPE VERSION with PWM Speed Control
- * 
- * Controls: 
- *   - Servo Motor (D4/GPIO2) → Door simulation
- *   - LED (D6/GPIO12) → Light simulation
- *   - DC Motor (D7/GPIO13) → Fan with PWM speed control
- * 
- * Broker: HiveMQ Cloud (TLS/SSL)
- * 
- * WIRING SUMMARY:
- * ---------------
- * SERVO MOTOR (SG90):
- *   Orange → D4 (GPIO2) Signal
- *   Red    → 5V external
- *   Brown  → GND (common)
- * 
- * LED (Light):
- *   LED(+) → D6 (GPIO12)
- *   LED(-) → 220Ω resistor → GND
- * 
- * DC MOTOR (Fan) via BC547 Transistor:
- *   D7 (GPIO13) → 1kΩ resistor → BC547 Base
- *   BC547 Emitter → GND
- *   BC547 Collector → DC Motor (-)
- *   DC Motor (+) → 5V external
- *   1N4007 Diode: Cathode to +5V, Anode to Collector
- */
+/*******************************************************
+ * AetherHome ESP8266 MQTT Controller - ON/OFF Motor
+ * Using L293D Motor Driver Module (M1 M2 IN1 IN2 EN1)
+ *******************************************************/
 
 #include <ESP8266WiFi.h>
-#include <PubSubClient.h>
 #include <WiFiClientSecure.h>
+#include <PubSubClient.h>
 #include <Servo.h>
 
-// ============== CONFIGURATION ==============
+/* =========================
+   == Configuration ==
+   ========================= */
+// WiFi Configuration
+const char* WIFI_SSID = "your_ssid";
+const char* WIFI_PASS = "your_password";
 
-// WiFi Credentials
-const char* WIFI_SSID = "Your Wifi name";
-const char* WIFI_PASS = "your password";
-
-// HiveMQ Cloud Credentials
-const char* MQTT_HOST = "your_host_name";
+// MQTT Configuration (TLS)
+const char* MQTT_HOST = "mqtt.example.com";
 const int   MQTT_PORT = 8883;
-const char* MQTT_USER = "your_mqtt_username";
-const char* MQTT_PASS = "your_password";
-const char* CLIENT_ID = "yourclientid";
+const char* MQTT_USER = "mqtt_user";
+const char* MQTT_PASS = "mqtt_password";
+const char* CLIENT_ID  = "AetherHome_ESP8266_001";
 
-// MQTT Topics
+// Topics
 const char* TOPIC_DOOR      = "home/livingroom/door/set";
 const char* TOPIC_LIGHT     = "home/livingroom/light/set";
 const char* TOPIC_FAN_POWER = "home/livingroom/fan/set";
-const char* TOPIC_FAN_SPEED = "home/livingroom/fan/speed/set";
 const char* TOPIC_STATUS    = "home/livingroom/status";
 
-// ============== PIN CONFIGURATION ==============
+/* =========================
+   == Pin Definitions ==
+   ========================= */
+// Note: D# names allowed on ESP8266 (NodeMCU/WeMos)
+#define SERVO_PIN   D4
+#define LIGHT_PIN   D6
 
-#define SERVO_PIN  D4   // GPIO2  - Servo Motor (Door)
-#define LIGHT_PIN  D6   // GPIO12 - LED (Light)
-#define FAN_PIN    D7   // GPIO13 - DC Motor via BC547 (Fan) - PWM Capable
+// L293D Motor Pins (Revised)
+#define MOTOR_EN1   D7     // Enable pin (EN1)
+#define MOTOR_IN1   D5     // Input 1 (IN1)
+#define MOTOR_IN2   D8     // Input 2 (IN2)
 
-// Servo Positions
-#define DOOR_OPEN    180
-#define DOOR_CLOSED  0
+// Servo positions
+#define DOOR_OPEN     180
+#define DOOR_CLOSED   0
 
-// ============== OBJECTS ==============
-
+/* =========================
+   == Globals ==
+   ========================= */
 WiFiClientSecure espClient;
 PubSubClient mqtt(espClient);
 Servo doorServo;
 
-// State variables
 bool lightState = false;
-bool fanState = false;
-int fanSpeed = 0;  // 0-255 PWM value
+bool fanState   = false;
 
-// ============== SETUP ==============
+// Non-blocking reconnect timing
+unsigned long lastMqttReconnectAttempt = 0;
+const unsigned long MQTT_RECONNECT_INTERVAL = 5000; // ms
 
+/* =========================
+   == Function prototypes ==
+   ========================= */
+void setupWiFi();
+void connectMQTT_ifNeeded();
+bool connectMQTT();
+void mqttCallback(char* topic, byte* payload, unsigned int length);
+void handleDoor(const String &cmd);
+void handleLight(const String &cmd);
+void handleFan(const String &cmd);
+void publishStatus(const char* status);
+
+/* =========================
+   == Setup ==
+   ========================= */
 void setup() {
   Serial.begin(115200);
-  delay(100);
-  
-  Serial.println("\n");
-  Serial.println("====================================");
-  Serial.println("    AetherHome Controller");
-  Serial.println("    PWM SPEED CONTROL ENABLED");
-  Serial.println("====================================");
+  delay(50);
+  Serial.println();
+  Serial.println("AetherHome ESP8266 Starting...");
 
-  // Initialize Servo (Door)
+  // Servo
   doorServo.attach(SERVO_PIN);
   doorServo.write(DOOR_CLOSED);
-  Serial.println("[INIT] Servo initialized (Door CLOSED)");
 
-  // Initialize LED (Light)
+  // Light pin
   pinMode(LIGHT_PIN, OUTPUT);
   digitalWrite(LIGHT_PIN, LOW);
-  Serial.println("[INIT] LED initialized (Light OFF)");
 
-  // Initialize DC Motor pin (Fan) - PWM capable
-  pinMode(FAN_PIN, OUTPUT);
-  analogWrite(FAN_PIN, 0);
-  Serial.println("[INIT] DC Motor PWM initialized (Fan OFF)");
+  // Motor (L293D) pins
+  pinMode(MOTOR_EN1, OUTPUT);
+  pinMode(MOTOR_IN1, OUTPUT);
+  pinMode(MOTOR_IN2, OUTPUT);
+  // Ensure motor is OFF initially
+  digitalWrite(MOTOR_EN1, LOW);
+  digitalWrite(MOTOR_IN1, LOW);
+  digitalWrite(MOTOR_IN2, LOW);
 
-  // Connect WiFi
+  // WiFi + MQTT setup
   setupWiFi();
-
-  // Configure MQTT
-  espClient.setInsecure();
+  espClient.setInsecure(); // NOTE: Insecure TLS; replace with proper cert handling for production
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(mqttCallback);
-  mqtt.setBufferSize(512);
 
-  // Initial connection
-  connectMQTT();
+  // Try initial MQTT connect (non-blocking will manage retries)
+  connectMQTT_ifNeeded();
 }
 
-// ============== MAIN LOOP ==============
-
+/* =========================
+   == Main Loop ==
+   ========================= */
 void loop() {
-  if (!mqtt.connected()) {
-    connectMQTT();
+  // Keep MQTT connection alive and process incoming messages
+  connectMQTT_ifNeeded();
+  if (mqtt.connected()) {
+    mqtt.loop();
   }
-  mqtt.loop();
+
+  // ... add other periodic tasks here (e.g., status heartbeat)
 }
 
-// ============== WIFI SETUP ==============
-
+/* =========================
+   == WiFi & MQTT Helpers ==
+   ========================= */
 void setupWiFi() {
-  Serial.println();
-  Serial.print("[WIFI] Connecting to: ");
-  Serial.println(WIFI_SSID);
-
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
-
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 40) {
-    delay(500);
+  Serial.print("Connecting to WiFi");
+  unsigned long start = millis();
+  const unsigned long WIFI_TIMEOUT = 15000; // 15s timeout
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(250);
     Serial.print(".");
-    attempts++;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println();
-    Serial.println("[WIFI] Connected!");
-    Serial.print("[WIFI] IP Address: ");
-    Serial.println(WiFi.localIP());
-    Serial.print("[WIFI] Signal: ");
-    Serial.print(WiFi.RSSI());
-    Serial.println(" dBm");
-  } else {
-    Serial.println();
-    Serial.println("[WIFI] Failed! Restarting...");
-    ESP.restart();
-  }
-}
-
-// ============== MQTT CONNECTION ==============
-
-void connectMQTT() {
-  int retries = 0;
-  
-  while (!mqtt.connected() && retries < 5) {
-    Serial.print("[MQTT] Connecting...");
-
-    if (mqtt.connect(CLIENT_ID, MQTT_USER, MQTT_PASS)) {
-      Serial.println(" Connected!");
-
-      mqtt.subscribe(TOPIC_DOOR);
-      mqtt.subscribe(TOPIC_LIGHT);
-      mqtt.subscribe(TOPIC_FAN_POWER);
-      mqtt.subscribe(TOPIC_FAN_SPEED);
-
-      Serial.println("[MQTT] Subscribed:");
-      Serial.println("  -> " + String(TOPIC_DOOR));
-      Serial.println("  -> " + String(TOPIC_LIGHT));
-      Serial.println("  -> " + String(TOPIC_FAN_POWER));
-      Serial.println("  -> " + String(TOPIC_FAN_SPEED));
-
-      mqtt.publish(TOPIC_STATUS, "online");
-
-    } else {
-      Serial.print(" Failed: ");
-      Serial.println(mqtt.state());
-      retries++;
-      delay(5000);
+    if (millis() - start > WIFI_TIMEOUT) {
+      Serial.println("\nWiFi connection timeout - retrying...");
+      start = millis();
     }
   }
-  
-  if (!mqtt.connected()) {
-    Serial.println("[MQTT] Restarting...");
-    ESP.restart();
+  Serial.println("\nWiFi Connected");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+void connectMQTT_ifNeeded() {
+  if (mqtt.connected()) return;
+
+  if (millis() - lastMqttReconnectAttempt < MQTT_RECONNECT_INTERVAL) return;
+  lastMqttReconnectAttempt = millis();
+
+  Serial.println("Attempting MQTT connection...");
+  if (connectMQTT()) {
+    Serial.println("MQTT connected.");
+  } else {
+    Serial.println("MQTT connect failed - will retry.");
   }
 }
 
-// ============== MQTT CALLBACK ==============
+bool connectMQTT() {
+  if (mqtt.connect(CLIENT_ID, MQTT_USER, MQTT_PASS)) {
+    // Subscribe to topics
+    mqtt.subscribe(TOPIC_DOOR);
+    mqtt.subscribe(TOPIC_LIGHT);
+    mqtt.subscribe(TOPIC_FAN_POWER);
 
+    // Publish online status
+    mqtt.publish(TOPIC_STATUS, "online", true);
+    return true;
+  }
+  return false;
+}
+
+/* =========================
+   == MQTT Callback ==
+   ========================= */
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String message;
-  for (unsigned int i = 0; i < length; i++) {
-    message += (char)payload[i];
-  }
+  message.reserve(length + 1);
+  for (unsigned int i = 0; i < length; ++i) message += (char)payload[i];
   message.trim();
 
-  Serial.print("[RECV] ");
+  Serial.print("MQTT msg: [");
   Serial.print(topic);
-  Serial.print(" -> ");
+  Serial.print("] -> ");
   Serial.println(message);
 
-  String topicStr = String(topic);
-  
-  if (topicStr == TOPIC_DOOR) {
-    handleDoor(message);
-  }
-  else if (topicStr == TOPIC_LIGHT) {
-    handleLight(message);
-  }
-  else if (topicStr == TOPIC_FAN_POWER) {
-    handleFanPower(message);
-  }
-  else if (topicStr == TOPIC_FAN_SPEED) {
-    handleFanSpeed(message);
-  }
+  String t = String(topic);
+  if (t == TOPIC_DOOR)      handleDoor(message);
+  else if (t == TOPIC_LIGHT) handleLight(message);
+  else if (t == TOPIC_FAN_POWER) handleFan(message);
 }
 
-// ============== DEVICE HANDLERS ==============
-
-void handleDoor(String cmd) {
+/* =========================
+   == Device Handlers ==
+   ========================= */
+void handleDoor(const String &cmdRaw) {
+  String cmd = cmdRaw;
   cmd.toUpperCase();
-  
   if (cmd == "OPEN") {
-    Serial.print("[DOOR] Opening... ");
-    for (int pos = doorServo.read(); pos <= DOOR_OPEN; pos += 2) {
-      doorServo.write(pos);
-      delay(15);
-    }
     doorServo.write(DOOR_OPEN);
-    Serial.println("OPENED");
-  } 
-  else if (cmd == "CLOSE") {
-    Serial.print("[DOOR] Closing... ");
-    for (int pos = doorServo.read(); pos >= DOOR_CLOSED; pos -= 2) {
-      doorServo.write(pos);
-      delay(15);
-    }
+    publishStatus("door_open");
+    Serial.println("Door: OPEN");
+  } else if (cmd == "CLOSE") {
     doorServo.write(DOOR_CLOSED);
-    Serial.println("CLOSED");
+    publishStatus("door_closed");
+    Serial.println("Door: CLOSE");
+  } else {
+    Serial.println("Door: Unknown command");
   }
 }
 
-void handleLight(String cmd) {
+void handleLight(const String &cmdRaw) {
+  String cmd = cmdRaw;
   cmd.toUpperCase();
-  
   if (cmd == "ON") {
     digitalWrite(LIGHT_PIN, HIGH);
     lightState = true;
-    Serial.println("[LIGHT] ON");
-  } 
-  else if (cmd == "OFF") {
+    publishStatus("light_on");
+    Serial.println("Light: ON");
+  } else if (cmd == "OFF") {
     digitalWrite(LIGHT_PIN, LOW);
     lightState = false;
-    Serial.println("[LIGHT] OFF");
-  }
-}
-
-void handleFanPower(String cmd) {
-  cmd.toUpperCase();
-  
-  if (cmd == "ON") {
-    fanState = true;
-    // Apply current speed or default to medium speed if 0
-    if (fanSpeed == 0) {
-      fanSpeed = 128; // 50% speed
-    }
-    analogWrite(FAN_PIN, fanSpeed);
-    Serial.print("[FAN] Motor ON - Speed: ");
-    Serial.print(map(fanSpeed, 0, 255, 0, 100));
-    Serial.println("%");
-  } 
-  else if (cmd == "OFF") {
-    fanState = false;
-    analogWrite(FAN_PIN, 0);
-    Serial.println("[FAN] Motor OFF");
-  }
-}
-
-void handleFanSpeed(String cmd) {
-  int speed = cmd.toInt();
-  
-  // Constrain to valid PWM range
-  speed = constrain(speed, 0, 255);
-  fanSpeed = speed;
-  
-  // Only apply if fan is ON
-  if (fanState) {
-    analogWrite(FAN_PIN, fanSpeed);
-    Serial.print("[FAN] Speed changed: ");
-    Serial.print(map(fanSpeed, 0, 255, 0, 100));
-    Serial.println("%");
+    publishStatus("light_off");
+    Serial.println("Light: OFF");
   } else {
-    Serial.print("[FAN] Speed set to ");
-    Serial.print(map(fanSpeed, 0, 255, 0, 100));
-    Serial.println("% (will apply when turned ON)");
-  }
-  
-  // Auto-off if speed set to 0
-  if (speed == 0 && fanState) {
-    fanState = false;
-    analogWrite(FAN_PIN, 0);
-    Serial.println("[FAN] Auto-OFF (speed = 0)");
+    Serial.println("Light: Unknown command");
   }
 }
 
-// ============== UTILITY ==============
+void handleFan(const String &cmdRaw) {
+  String cmd = cmdRaw;
+  cmd.toUpperCase();
+  if (cmd == "ON") {
+    // L293D: set direction IN1 HIGH, IN2 LOW, enable HIGH
+    digitalWrite(MOTOR_IN1, HIGH);
+    digitalWrite(MOTOR_IN2, LOW);
+    digitalWrite(MOTOR_EN1, HIGH);
+    fanState = true;
+    publishStatus("fan_on");
+    Serial.println("Fan: ON");
+  } else if (cmd == "OFF") {
+    // stop motor
+    digitalWrite(MOTOR_EN1, LOW);
+    digitalWrite(MOTOR_IN1, LOW);
+    digitalWrite(MOTOR_IN2, LOW);
+    fanState = false;
+    publishStatus("fan_off");
+    Serial.println("Fan: OFF");
+  } else {
+    Serial.println("Fan: Unknown command");
+  }
+}
 
-void publishStatus() {
+/* =========================
+   == Utility ==
+   ========================= */
+void publishStatus(const char* status) {
   if (mqtt.connected()) {
-    String status = "{\"light\":";
-    status += lightState ? "true" : "false";
-    status += ",\"fan\":";
-    status += fanState ? "true" : "false";
-    status += ",\"fanSpeed\":";
-    status += fanSpeed;
-    status += ",\"fanSpeedPercent\":";
-    status += map(fanSpeed, 0, 255, 0, 100);
-    status += "}";
-    mqtt.publish(TOPIC_STATUS, status.c_str());
-    Serial.println("[STATUS] Published");
+    mqtt.publish(TOPIC_STATUS, status, true);
   }
 }
